@@ -5,6 +5,7 @@ pragma solidity ^0.8.18;
 
 import {VRFCoordinatorV2Interface} from "@chainlink/contracts/src/v0.8/vrf/interfaces/VRFCoordinatorV2Interface.sol";
 import {VRFConsumerBaseV2} from "@chainlink/contracts/src/v0.8/vrf/VRFConsumerBaseV2.sol";
+import {console} from "forge-std/Script.sol";
 
 /**
  * @title A Raffle Contract
@@ -45,12 +46,15 @@ contract Raffle is VRFConsumerBaseV2 {
 
     event EnteredRaffle(address indexed player);
     event WinnerPicked(address indexed winner);
+    event RequestRaffleWinner(uint256 indexed requestId);
 
     constructor(
         uint256 entranceFee,
         uint256 interval,
         address vrfcoordinator,
-        bytes32 keyhash
+        bytes32 keyhash,
+        uint64 subscriptionId,
+        uint32 callbackGasLimit
     ) VRFConsumerBaseV2(vrfcoordinator) {
         i_entranceFee = entranceFee;
         i_interval = interval;
@@ -58,6 +62,8 @@ contract Raffle is VRFConsumerBaseV2 {
         i_vrfcoordinator = VRFCoordinatorV2Interface(vrfcoordinator);
         i_keyhash = keyhash;
         s_raffleState = RaffleState.OPEN;
+        i_subscriptionId = subscriptionId;
+        i_callbackGasLimit = callbackGasLimit;
     }
 
     function enterRaffle() external payable {
@@ -87,7 +93,7 @@ contract Raffle is VRFConsumerBaseV2 {
         return (upkeepNeeded, "0x0");
     }
 
-    function performUpkeep(bytes calldata) external {
+    function performUpkeep(bytes calldata /* performData */) external {
         (bool upkeepNeeded, ) = checkUpkeep("");
         if (!upkeepNeeded) {
             revert Raffle_UpKeepNotNeeded(
@@ -100,14 +106,15 @@ contract Raffle is VRFConsumerBaseV2 {
             revert();
         }
         s_raffleState = RaffleState.CALCULATING;
-        // uint256 requestId =
-        i_vrfcoordinator.requestRandomWords(
+        uint256 requestId = i_vrfcoordinator.requestRandomWords(
             i_keyhash,
             i_subscriptionId,
             REQUEST_CONFIRMAATION,
             i_callbackGasLimit,
             NUM_WORDS
         );
+
+        emit RequestRaffleWinner(requestId);
     }
 
     function fulfillRandomWords(
@@ -118,9 +125,9 @@ contract Raffle is VRFConsumerBaseV2 {
         address payable winner = s_players[indexOfWinner];
         s_recentWinner = winner;
         s_raffleState = RaffleState.OPEN;
-
         s_players = new address payable[](0);
         s_lastTimeStamp = block.timestamp;
+        console.log("The balance of this contract: ", address(this).balance);
         (bool success, ) = winner.call{value: address(this).balance}("");
         if (!success) {
             revert Raffle_TransferFailed();
@@ -130,5 +137,25 @@ contract Raffle is VRFConsumerBaseV2 {
 
     function getEntranceFee() external view returns (uint256) {
         return i_entranceFee;
+    }
+
+    function getRaffleState() external view returns (RaffleState) {
+        return s_raffleState;
+    }
+
+    function getPlayer(uint256 indexOfPlayer) external view returns (address) {
+        return s_players[indexOfPlayer];
+    }
+
+    function getRecentWinner() external view returns (address) {
+        return s_recentWinner;
+    }
+
+    function getLengthOfPlayers() external view returns (uint256) {
+        return s_players.length;
+    }
+
+    function getLastTimeStamp() external view returns (uint256) {
+        return s_lastTimeStamp;
     }
 }
